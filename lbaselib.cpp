@@ -223,8 +223,19 @@ static int luaB_next (lua_State *L) {
   }
 }
 
+static int pairsnilaux (lua_State *L) {
+  (void)L;
+  return 0;
+}
+
 
 static int luaB_pairs (lua_State *L) {
+  if (lua_isnil(L, 1)) {
+    lua_pushcfunction(L, pairsnilaux);
+    lua_pushnil(L);
+    lua_pushnil(L);
+    return 3;
+  }
   return pairsmeta(L, "__pairs", 0, luaB_next);
 }
 
