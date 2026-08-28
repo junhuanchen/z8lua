@@ -16,9 +16,56 @@
 #include <cmath>       // std::abs
 #include <algorithm>   // std::min
 #include <type_traits> // std::enable_if
+#ifdef PICO_FIX32_PROFILE
+#include "esp_cpu.h"
+#endif
 
 namespace z8
 {
+
+#ifdef PICO_FIX32_PROFILE
+struct fix32_div_cache_entry
+{
+    int32_t numerator;
+    int32_t denominator;
+    int32_t result;
+    bool valid;
+};
+
+inline fix32_div_cache_entry fix32_div_cache[256] = {};
+inline uint64_t fix32_div_count = 0;
+inline uint64_t fix32_div_cache_hits = 0;
+inline uint64_t fix32_div_integer_fast = 0;
+inline uint64_t fix32_div_cycles = 0;
+
+inline uint64_t fix32_take_div_count()
+{
+    const uint64_t result = fix32_div_count;
+    fix32_div_count = 0;
+    return result;
+}
+
+inline uint64_t fix32_take_div_cache_hits()
+{
+    const uint64_t result = fix32_div_cache_hits;
+    fix32_div_cache_hits = 0;
+    return result;
+}
+
+inline uint64_t fix32_take_div_integer_fast()
+{
+    const uint64_t result = fix32_div_integer_fast;
+    fix32_div_integer_fast = 0;
+    return result;
+}
+
+inline uint64_t fix32_take_div_cycles()
+{
+    const uint64_t result = fix32_div_cycles;
+    fix32_div_cycles = 0;
+    return result;
+}
+#endif
 
 struct fix32
 {
@@ -122,20 +169,64 @@ struct fix32
 
     fix32 operator /(fix32 x) const
     {
+#ifdef PICO_FIX32_PROFILE
+        const uint32_t cycle_start = esp_cpu_get_cycle_count();
+        ++fix32_div_count;
+        const uint32_t cache_index =
+            (uint32_t(m_bits) * 2654435761u ^ uint32_t(x.m_bits)) & 255u;
+        fix32_div_cache_entry &cached = fix32_div_cache[cache_index];
+        if (cached.valid && cached.numerator == m_bits &&
+            cached.denominator == x.m_bits)
+        {
+            ++fix32_div_cache_hits;
+            fix32_div_cycles += esp_cpu_get_cycle_count() - cycle_start;
+            return frombits(cached.result);
+        }
+#endif
+        int32_t result_bits;
         // This special case ensures 0x8000/0x1 = 0x8000, not 0x8000.0001
         if (x.m_bits == 0x10000)
-            return *this;
-
-        if (x.m_bits)
+        {
+            result_bits = m_bits;
+#ifdef PICO_FIX32_PROFILE
+            ++fix32_div_integer_fast;
+#endif
+        }
+        else if (x.m_bits && (x.m_bits & 0xffff) == 0)
+        {
+            const int64_t result = int64_t(m_bits) / (x.m_bits / 0x10000);
+            using std::abs;
+            if (abs(result) <= 0x7fffffffu)
+                result_bits = int32_t(result);
+            else
+                result_bits = (m_bits ^ x.m_bits) >= 0
+                    ? int32_t(0x7fffffffu) : int32_t(0x80000001u);
+#ifdef PICO_FIX32_PROFILE
+            ++fix32_div_integer_fast;
+#endif
+        }
+        else if (x.m_bits)
         {
             using std::abs;
-            int64_t result = int64_t(m_bits) * 0x10000 / x.m_bits;
+            const int64_t result = int64_t(m_bits) * 0x10000 / x.m_bits;
             if (abs(result) <= 0x7fffffffu)
-                return frombits(int32_t(result));
+                result_bits = int32_t(result);
+            else
+                result_bits = (m_bits ^ x.m_bits) >= 0
+                    ? int32_t(0x7fffffffu) : int32_t(0x80000001u);
+        }
+        else
+        {
+            // Return 0x8000.0001 (not 0x8000.0000) for -Inf, just like PICO-8
+            result_bits = (m_bits ^ x.m_bits) >= 0
+                ? int32_t(0x7fffffffu) : int32_t(0x80000001u);
         }
 
-        // Return 0x8000.0001 (not 0x8000.0000) for -Inf, just like PICO-8
-        return frombits((m_bits ^ x.m_bits) >= 0 ? 0x7fffffffu : 0x80000001u);
+#ifdef PICO_FIX32_PROFILE
+        cached = {m_bits, x.m_bits, result_bits, true};
+        fix32_div_cycles += esp_cpu_get_cycle_count() - cycle_start;
+#endif
+        return frombits(result_bits);
     }
 
     fix32 operator %(fix32 x) const

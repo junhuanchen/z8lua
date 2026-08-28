@@ -25,6 +25,7 @@
 #include "ltable.h"
 #include "ltm.h"
 #include "lvm.h"
+#include "pico_profile.h"
 
 
 
@@ -563,6 +564,38 @@ void luaV_finishOp (lua_State *L) {
 #define vmcase(l,b)	case l: {b}  break;
 #define vmcasenb(l,b)	case l: {b}		/* nb = no break */
 
+#ifdef PICO_VM_OPCODE_PROFILE
+static uint64_t pico_vm_opcode_counts[NUM_OPCODES];
+static uint32_t pico_vm_profile_frames;
+
+void pico_vm_profile_start(uint32_t frames) {
+  memset(pico_vm_opcode_counts, 0, sizeof(pico_vm_opcode_counts));
+  pico_vm_profile_frames = frames;
+}
+
+void pico_vm_profile_end_frame() {
+  if (pico_vm_profile_frames == 0 || --pico_vm_profile_frames != 0) return;
+  uint64_t total = 0;
+  for (int opcode = 0; opcode < NUM_OPCODES; ++opcode)
+    total += pico_vm_opcode_counts[opcode];
+  printf("VM_PROFILE total=%llu", (unsigned long long)total);
+  for (int rank = 0; rank < 10; ++rank) {
+    int hottest = -1;
+    for (int opcode = 0; opcode < NUM_OPCODES; ++opcode) {
+      if (pico_vm_opcode_counts[opcode] != 0 &&
+          (hottest < 0 || pico_vm_opcode_counts[opcode] >
+                              pico_vm_opcode_counts[hottest]))
+        hottest = opcode;
+    }
+    if (hottest < 0) break;
+    printf(" %s=%llu", luaP_opnames[hottest],
+           (unsigned long long)pico_vm_opcode_counts[hottest]);
+    pico_vm_opcode_counts[hottest] = 0;
+  }
+  printf("\n");
+}
+#endif
+
 void luaV_execute (lua_State *L) {
   CallInfo *ci = L->ci;
   LClosure *cl;
@@ -585,7 +618,13 @@ void luaV_execute (lua_State *L) {
     ra = RA(i);
     lua_assert(base == ci->u.l.base);
     lua_assert(base <= L->top && L->top < L->stack + L->stacksize);
+#ifdef PICO_VM_OPCODE_PROFILE
+    const OpCode current_opcode = GET_OPCODE(i);
+    if (pico_vm_profile_frames != 0) ++pico_vm_opcode_counts[current_opcode];
+    vmdispatch (current_opcode) {
+#else
     vmdispatch (GET_OPCODE(i)) {
+#endif
       vmcase(OP_MOVE,
         setobjs2s(L, ra, RB(i));
       )

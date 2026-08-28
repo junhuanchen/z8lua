@@ -24,15 +24,18 @@
 #include "lauxlib.h"
 #include "llimits.h"
 #include "lobject.h"
+#include "pico_profile.h"
 
 #define TAU 6.2831853071795864769252867665590057683936
 
 static int pico8_max(lua_State *l) {
+    PICO_PROFILE_SCOPE(PICO_PROFILE_MAX);
     lua_pushnumber(l, lua_Number::max(lua_tonumber(l, 1), lua_tonumber(l, 2)));
     return 1;
 }
 
 static int pico8_min(lua_State *l) {
+    PICO_PROFILE_SCOPE(PICO_PROFILE_MIN);
     lua_pushnumber(l, lua_Number::min(lua_tonumber(l, 1), lua_tonumber(l, 2)));
     return 1;
 }
@@ -52,6 +55,7 @@ static int pico8_ceil(lua_State *l) {
 }
 
 static int pico8_flr(lua_State *l) {
+    PICO_PROFILE_SCOPE(PICO_PROFILE_FLR);
     lua_pushnumber(l, lua_Number::floor(lua_tonumber(l, 1)));
     return 1;
 }
@@ -93,6 +97,7 @@ static int pico8_sgn(lua_State *l) {
 }
 
 static int pico8_band(lua_State *l) {
+    PICO_PROFILE_SCOPE(PICO_PROFILE_BAND);
     lua_pushnumber(l, lua_tonumber(l, 1) & lua_tonumber(l, 2));
     return 1;
 }
@@ -118,6 +123,7 @@ static int pico8_shl(lua_State *l) {
 }
 
 static int pico8_lshr(lua_State *l) {
+    PICO_PROFILE_SCOPE(PICO_PROFILE_LSHR);
     lua_pushnumber(l, lua_Number::lshr(lua_tonumber(l, 1), int(lua_tonumber(l, 2))));
     return 1;
 }

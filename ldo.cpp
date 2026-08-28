@@ -30,6 +30,7 @@
 #include "lundump.h"
 #include "lvm.h"
 #include "lzio.h"
+#include "pico_profile.h"
 
 
 
@@ -289,6 +290,7 @@ int luaD_precall (lua_State *L, StkId func, int nresults) {
     case LUA_TCCL: {  /* C closure */
       f = clCvalue(func)->f;
      Cfunc:
+      PICO_PROFILE_C_CALL_SCOPE();
       luaD_checkstack(L, LUA_MINSTACK);  /* ensure minimum stack size */
       ci = next_ci(L);  /* now 'enter' new function */
       ci->nresults = nresults;

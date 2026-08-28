@@ -18,6 +18,7 @@
 
 #include "lauxlib.h"
 #include "lualib.h"
+#include "pico_profile.h"
 
 
 static int luaB_print (lua_State *L) {
@@ -213,6 +214,7 @@ static int pairsmeta (lua_State *L, const char *method, int iszero,
 
 
 static int luaB_next (lua_State *L) {
+  PICO_PROFILE_SCOPE(PICO_PROFILE_NEXT);
   luaL_checktype(L, 1, LUA_TTABLE);
   lua_settop(L, 2);  /* create a 2nd argument if there isn't one */
   if (lua_next(L, 1))
