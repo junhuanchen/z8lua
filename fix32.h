@@ -164,6 +164,8 @@ struct fix32
 
     fix32 operator *(fix32 x) const
     {
+        if ((x.m_bits & 0xffff) == 0)
+            return frombits(int64_t(m_bits) * (x.m_bits >> 16));
         return frombits(int64_t(m_bits) * x.m_bits >> 16);
     }
 

@@ -33,6 +33,19 @@
 #define MAXTAGLOOP	100
 
 
+/* Inlined short-string hash probe: mirrors luaH_getstr() to avoid the
+   cross-TU call and generic dispatch in the hot GETTABUP/SETTABUP paths. */
+static inline const TValue *pico_luaH_getstr_inline(Table *t, TString *key) {
+  Node *n = gnode(t, lmod(key->tsv.hash, sizenode(t)));
+  do {  /* check whether `key' is somewhere in the chain */
+    if (ttisshrstring(gkey(n)) && eqshrstr(rawtsvalue(gkey(n)), key))
+      return gval(n);  /* that's it */
+    else n = gnext(n);
+  } while (n);
+  return luaO_nilobject;
+}
+
+
 const TValue *luaV_tonumber (const TValue *obj, TValue *n) {
   lua_Number num;
   if (ttisnumber(obj)) return obj;
@@ -762,7 +775,7 @@ void luaV_execute (lua_State *L) {
             }
           }
 #endif
-          const TValue *res = luaH_getstr(h, string_key);
+          const TValue *res = pico_luaH_getstr_inline(h, string_key);
           if (!ttisnil(res) || fasttm(L, h->metatable, TM_INDEX) == NULL) {
 #ifdef PICO_GLOBAL_INLINE_CACHE
             if (h->metatable == NULL && res != luaO_nilobject)
@@ -799,7 +812,7 @@ void luaV_execute (lua_State *L) {
           }
 #endif
           TValue *oldval = cast(TValue *,
-                                luaH_getstr(h, string_key));
+                                pico_luaH_getstr_inline(h, string_key));
           if (!ttisnil(oldval)) {
 #ifdef PICO_GLOBAL_INLINE_CACHE
             if (h->metatable == NULL && oldval != luaO_nilobject)
