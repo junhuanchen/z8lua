@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdint.h>
 #define lvm_c
 #define LUA_CORE
 
@@ -560,9 +560,95 @@ void luaV_finishOp (lua_State *L) {
         } \
         else { Protect(luaV_arith(L, ra, rb, rb, tm)); } }
 
-#define vmdispatch(o)	switch(o)
-#define vmcase(l,b)	case l: {b}  break;
-#define vmcasenb(l,b)	case l: {b}		/* nb = no break */
+#ifdef PICO_VM_COMPUTED_GOTO
+#define PICO_VM_OPCODE_LIST(V) \
+  V(OP_MOVE) V(OP_LOADK) V(OP_LOADKX) V(OP_LOADBOOL) V(OP_LOADNIL) \
+  V(OP_GETUPVAL) V(OP_GETTABUP) V(OP_GETTABLE) V(OP_SETTABUP) \
+  V(OP_SETUPVAL) V(OP_SETTABLE) V(OP_NEWTABLE) V(OP_SELF) V(OP_ADD) \
+  V(OP_SUB) V(OP_MUL) V(OP_DIV) V(OP_MOD) V(OP_POW) V(OP_IDIV) \
+  V(OP_BAND) V(OP_BOR) V(OP_BXOR) V(OP_SHL) V(OP_SHR) V(OP_LSHR) \
+  V(OP_ROTL) V(OP_ROTR) V(OP_UNM) V(OP_BNOT) V(OP_NOT) V(OP_PEEK) \
+  V(OP_PEEK2) V(OP_PEEK4) V(OP_LEN) V(OP_CONCAT) V(OP_JMP) V(OP_EQ) \
+  V(OP_LT) V(OP_LE) V(OP_TEST) V(OP_TESTSET) V(OP_CALL) V(OP_TAILCALL) \
+  V(OP_RETURN) V(OP_FORLOOP) V(OP_FORPREP) V(OP_TFORCALL) \
+  V(OP_TFORLOOP) V(OP_SETLIST) V(OP_CLOSURE) V(OP_VARARG) V(OP_EXTRAARG)
+#define PICO_VM_LABEL_ADDRESS(name) &&vm_##name,
+#define vmdispatch(o) goto *dispatch_table[(o)]
+#define vmcase(l,b) vm_##l: {b} goto vm_next;
+#define vmcasenb(l,b) vm_##l: {b}
+#define vmbreak goto vm_next
+#else
+#define vmdispatch(o) switch(o)
+#define vmcase(l,b) case l: {b} break;
+#define vmcasenb(l,b) case l: {b}
+#define vmbreak break
+#endif
+
+#ifdef PICO_GLOBAL_CACHE_PROFILE
+static uint64_t pico_global_cache_lookups;
+static uint64_t pico_global_cache_hits;
+static uint64_t pico_global_cache_stores;
+
+void pico_global_cache_take(uint64_t *lookups, uint64_t *hits,
+                            uint64_t *stores) {
+  *lookups = pico_global_cache_lookups;
+  *hits = pico_global_cache_hits;
+  *stores = pico_global_cache_stores;
+  pico_global_cache_lookups = 0;
+  pico_global_cache_hits = 0;
+  pico_global_cache_stores = 0;
+}
+#endif
+
+#ifdef PICO_GLOBAL_INLINE_CACHE
+typedef struct PicoGlobalCacheEntry {
+  const Instruction *pc;
+  Table *table;
+  TString *key;
+  TValue *cell;
+  uint32_t version;
+} PicoGlobalCacheEntry;
+
+#define PICO_GLOBAL_CACHE_L1_SIZE 256
+static PicoGlobalCacheEntry pico_global_cache_l1[PICO_GLOBAL_CACHE_L1_SIZE];
+
+static unsigned int pico_global_cache_hash(const Instruction *pc,
+                                           const Table *table) {
+  uintptr_t value = (uintptr_t)pc >> 2;
+  value ^= (uintptr_t)table >> 4;
+  value ^= value >> 11;
+  return (unsigned int)value;
+}
+
+static TValue *pico_global_cache_lookup(const Instruction *pc, Table *table,
+                                        TString *key) {
+#ifdef PICO_GLOBAL_CACHE_PROFILE
+  ++pico_global_cache_lookups;
+#endif
+  const unsigned int hash = pico_global_cache_hash(pc, table);
+  PicoGlobalCacheEntry *entry =
+      &pico_global_cache_l1[hash & (PICO_GLOBAL_CACHE_L1_SIZE - 1)];
+  if (entry->pc == pc && entry->table == table && entry->key == key &&
+      entry->version == table->structure_version) {
+#ifdef PICO_GLOBAL_CACHE_PROFILE
+    ++pico_global_cache_hits;
+#endif
+    return entry->cell;
+  }
+  return NULL;
+}
+
+static void pico_global_cache_store(const Instruction *pc, Table *table,
+                                    TString *key, TValue *cell) {
+#ifdef PICO_GLOBAL_CACHE_PROFILE
+  ++pico_global_cache_stores;
+#endif
+  const unsigned int hash = pico_global_cache_hash(pc, table);
+  PicoGlobalCacheEntry value = {pc, table, key, cell,
+                                table->structure_version};
+  pico_global_cache_l1[hash & (PICO_GLOBAL_CACHE_L1_SIZE - 1)] = value;
+}
+#endif
 
 #ifdef PICO_VM_OPCODE_PROFILE
 static uint64_t pico_vm_opcode_counts[NUM_OPCODES];
@@ -597,6 +683,11 @@ void pico_vm_profile_end_frame() {
 #endif
 
 void luaV_execute (lua_State *L) {
+#ifdef PICO_VM_COMPUTED_GOTO
+  static const void *const dispatch_table[NUM_OPCODES] = {
+    PICO_VM_OPCODE_LIST(PICO_VM_LABEL_ADDRESS)
+  };
+#endif
   CallInfo *ci = L->ci;
   LClosure *cl;
   TValue *k;
@@ -618,12 +709,14 @@ void luaV_execute (lua_State *L) {
     ra = RA(i);
     lua_assert(base == ci->u.l.base);
     lua_assert(base <= L->top && L->top < L->stack + L->stacksize);
-#ifdef PICO_VM_OPCODE_PROFILE
     const OpCode current_opcode = GET_OPCODE(i);
+#ifdef PICO_VM_OPCODE_PROFILE
     if (pico_vm_profile_frames != 0) ++pico_vm_opcode_counts[current_opcode];
-    vmdispatch (current_opcode) {
+#endif
+#ifdef PICO_VM_COMPUTED_GOTO
+    vmdispatch(current_opcode);
 #else
-    vmdispatch (GET_OPCODE(i)) {
+    vmdispatch(current_opcode) {
 #endif
       vmcase(OP_MOVE,
         setobjs2s(L, ra, RB(i));
@@ -654,14 +747,72 @@ void luaV_execute (lua_State *L) {
       )
       vmcase(OP_GETTABUP,
         int b = GETARG_B(i);
-        Protect(luaV_gettable(L, cl->upvals[b]->v, RKC(i), ra));
+        const TValue *table = cl->upvals[b]->v;
+        TValue *key = RKC(i);
+        if (ttistable(table) && ttisshrstring(key)) {
+          Table *h = hvalue(table);
+          TString *string_key = rawtsvalue(key);
+#ifdef PICO_GLOBAL_INLINE_CACHE
+          if (h->metatable == NULL) {
+            TValue *cached = pico_global_cache_lookup(
+                ci->u.l.savedpc - 1, h, string_key);
+            if (cached != NULL) {
+              setobj2s(L, ra, cached);
+              vmbreak;
+            }
+          }
+#endif
+          const TValue *res = luaH_getstr(h, string_key);
+          if (!ttisnil(res) || fasttm(L, h->metatable, TM_INDEX) == NULL) {
+#ifdef PICO_GLOBAL_INLINE_CACHE
+            if (h->metatable == NULL && res != luaO_nilobject)
+              pico_global_cache_store(ci->u.l.savedpc - 1, h,
+                                      string_key, cast(TValue *, res));
+#endif
+            setobj2s(L, ra, res);
+            vmbreak;
+          }
+        }
+        Protect(luaV_gettable(L, table, key, ra));
       )
       vmcase(OP_GETTABLE,
         Protect(luaV_gettable(L, RB(i), RKC(i), ra));
       )
       vmcase(OP_SETTABUP,
         int a = GETARG_A(i);
-        Protect(luaV_settable(L, cl->upvals[a]->v, RKB(i), RKC(i)));
+        const TValue *table = cl->upvals[a]->v;
+        TValue *key = RKB(i);
+        StkId value = RKC(i);
+        if (ttistable(table) && ttisshrstring(key)) {
+          Table *h = hvalue(table);
+          TString *string_key = rawtsvalue(key);
+#ifdef PICO_GLOBAL_INLINE_CACHE
+          if (h->metatable == NULL) {
+            TValue *cached = pico_global_cache_lookup(
+                ci->u.l.savedpc - 1, h, string_key);
+            if (cached != NULL) {
+              setobj2t(L, cached, value);
+              invalidateTMcache(h);
+              luaC_barrierback(L, obj2gco(h), value);
+              vmbreak;
+            }
+          }
+#endif
+          TValue *oldval = cast(TValue *,
+                                luaH_getstr(h, string_key));
+          if (!ttisnil(oldval)) {
+#ifdef PICO_GLOBAL_INLINE_CACHE
+            if (h->metatable == NULL && oldval != luaO_nilobject)
+              pico_global_cache_store(ci->u.l.savedpc - 1, h,
+                                      string_key, oldval);
+#endif
+            setobj2t(L, oldval, value);
+            invalidateTMcache(h);
+            luaC_barrierback(L, obj2gco(h), value);
+            vmbreak;
+          }
+        }
+        Protect(luaV_settable(L, table, key, value));
       )
       vmcase(OP_SETUPVAL,
         UpVal *uv = cl->upvals[GETARG_B(i)];
@@ -967,7 +1118,12 @@ void luaV_execute (lua_State *L) {
       vmcase(OP_EXTRAARG,
         lua_assert(0);
       )
+#ifdef PICO_VM_COMPUTED_GOTO
+vm_next:
+      ;
+#else
     }
+#endif
   }
 }
 

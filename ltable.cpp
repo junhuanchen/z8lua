@@ -72,6 +72,12 @@ static const Node dummynode_ = {
   {NILCONSTANT},  /* value */
   {{NILCONSTANT, NULL}}  /* key */
 };
+static uint32_t table_structure_version_seed;
+
+static uint32_t next_structure_version(void) {
+  if (++table_structure_version_seed == 0) ++table_structure_version_seed;
+  return table_structure_version_seed;
+}
 
 
 /*
@@ -302,6 +308,7 @@ static void setnodevector (lua_State *L, Table *t, int size) {
 
 
 void luaH_resize (lua_State *L, Table *t, int nasize, int nhsize) {
+  t->structure_version = next_structure_version();
   int i;
   int oldasize = t->sizearray;
   int oldhsize = t->lsizenode;
@@ -369,6 +376,7 @@ Table *luaH_new (lua_State *L) {
   Table *t = &luaC_newobj(L, LUA_TTABLE, sizeof(Table), NULL, 0)->h;
   t->metatable = NULL;
   t->flags = cast_byte(~0);
+  t->structure_version = next_structure_version();
   t->array = NULL;
   t->sizearray = 0;
   setnodevector(L, t, 0);
@@ -407,6 +415,7 @@ TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
   if (ttisnil(key)) luaG_runerror(L, "table index is nil");
   else if (ttisnumber(key) && luai_numisnan(L, nvalue(key)))
     luaG_runerror(L, "table index is NaN");
+  t->structure_version = next_structure_version();
   mp = mainposition(t, key);
   if (!ttisnil(gval(mp)) || isdummy(mp)) {  /* main position is taken? */
     Node *othern;

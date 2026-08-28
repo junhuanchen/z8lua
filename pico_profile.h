@@ -23,6 +23,18 @@ inline void pico_vm_profile_start(uint32_t) {}
 inline void pico_vm_profile_end_frame() {}
 #endif
 
+#ifdef PICO_GLOBAL_CACHE_PROFILE
+void pico_global_cache_take(uint64_t* lookups, uint64_t* hits,
+                            uint64_t* stores);
+#else
+inline void pico_global_cache_take(uint64_t* lookups, uint64_t* hits,
+                                   uint64_t* stores) {
+    *lookups = 0;
+    *hits = 0;
+    *stores = 0;
+}
+#endif
+
 #ifdef PICO_PERF_PROFILE
 #include "esp_cpu.h"
 
