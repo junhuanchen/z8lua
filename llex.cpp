@@ -254,7 +254,12 @@ static void read_numeral (LexState *ls, SemInfo *seminfo) {
     } else check_next(ls, "Bb");  /* binary? */
   }
   for (;;) {
-    if (check_next(ls, expo))  /* exponent part? */
+    const bool valid_exponent = strchr(expo, ls->current) != NULL &&
+      ls->z->n > 0 &&
+      (lisdigit((unsigned char)ls->z->p[0]) ||
+       ((ls->z->p[0] == '+' || ls->z->p[0] == '-') &&
+        ls->z->n > 1 && lisdigit((unsigned char)ls->z->p[1])));
+    if (valid_exponent && check_next(ls, expo))  /* exponent part? */
       check_next(ls, "+-");  /* optional exponent sign */
     if ((hexa ? lisxdigit(ls->current) : lisdigit(ls->current)) || ls->current == '.')
       save_and_next(ls);
