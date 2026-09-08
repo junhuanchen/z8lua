@@ -32,6 +32,13 @@
 /* limit for table tag-method chains (to avoid loops) */
 #define MAXTAGLOOP	100
 
+#ifdef PICO_VM_OPCODE_PROFILE
+static uint64_t pico_vm_opcode_counts[NUM_OPCODES];
+static uint32_t pico_vm_profile_frames;
+static uint64_t pico_vm_index_metamethods;
+static uint64_t pico_vm_newindex_metamethods;
+#endif
+
 
 /* Inlined short-string hash probe: mirrors luaH_getstr() to avoid the
    cross-TU call and generic dispatch in the hot GETTABUP/SETTABUP paths. */
@@ -137,6 +144,9 @@ void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) {
     }
     else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
       luaG_typeerror(L, t, "index");
+#ifdef PICO_VM_OPCODE_PROFILE
+    if (pico_vm_profile_frames != 0) ++pico_vm_index_metamethods;
+#endif
     if (ttisfunction(tm)) {
       callTM(L, tm, t, key, val, 1);
       return;
@@ -176,6 +186,9 @@ void luaV_settable (lua_State *L, const TValue *t, TValue *key, StkId val) {
       if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_NEWINDEX)))
         luaG_typeerror(L, t, "index");
     /* there is a metamethod */
+#ifdef PICO_VM_OPCODE_PROFILE
+    if (pico_vm_profile_frames != 0) ++pico_vm_newindex_metamethods;
+#endif
     if (ttisfunction(tm)) {
       callTM(L, tm, t, key, val, 0);
       return;
@@ -220,12 +233,12 @@ static int call_orderTM (lua_State *L, const TValue *p1, const TValue *p2,
 }
 
 
-#define PEEK(ram, address) (ram && (address < 0x8000) ? ram[address] : 0)
+#define PEEK(ram, address) (ram && (address < 0x10000) ? ram[address] : 0)
 
 static z8::fix32 lua_peek(struct lua_State *L, z8::fix32 a, int count)
 {
   unsigned char const *p = G(L)->pico8memory;
-  int address = int(a) & 0x7fff;
+  int address = int(a) & 0xffff;
   uint32_t ret = 0;
   switch (count) {
     case 4:
@@ -664,11 +677,10 @@ static void pico_global_cache_store(const Instruction *pc, Table *table,
 #endif
 
 #ifdef PICO_VM_OPCODE_PROFILE
-static uint64_t pico_vm_opcode_counts[NUM_OPCODES];
-static uint32_t pico_vm_profile_frames;
-
 void pico_vm_profile_start(uint32_t frames) {
   memset(pico_vm_opcode_counts, 0, sizeof(pico_vm_opcode_counts));
+  pico_vm_index_metamethods = 0;
+  pico_vm_newindex_metamethods = 0;
   pico_vm_profile_frames = frames;
 }
 
@@ -677,7 +689,10 @@ void pico_vm_profile_end_frame() {
   uint64_t total = 0;
   for (int opcode = 0; opcode < NUM_OPCODES; ++opcode)
     total += pico_vm_opcode_counts[opcode];
-  printf("VM_PROFILE total=%llu", (unsigned long long)total);
+  printf("VM_PROFILE total=%llu meta_index=%llu meta_newindex=%llu",
+         (unsigned long long)total,
+         (unsigned long long)pico_vm_index_metamethods,
+         (unsigned long long)pico_vm_newindex_metamethods);
   for (int rank = 0; rank < 10; ++rank) {
     int hottest = -1;
     for (int opcode = 0; opcode < NUM_OPCODES; ++opcode) {

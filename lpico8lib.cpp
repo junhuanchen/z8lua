@@ -199,22 +199,34 @@ static int pico8_tonum(lua_State *l) {
 }
 
 static int pico8_chr(lua_State *l) {
-    char s[2] = { (char)(uint8_t)lua_tonumber(l, 1), '\0' };
-    lua_pushlstring(l, s, 1);
+    const int count = lua_gettop(l);
+    luaL_Buffer buffer;
+    char *output = luaL_buffinitsize(l, &buffer, (size_t)count);
+    for (int index = 0; index < count; ++index)
+        output[index] = (char)(uint8_t)luaL_checknumber(l, index + 1);
+    luaL_pushresultsize(&buffer, (size_t)count);
     return 1;
 }
 
 static int pico8_ord(lua_State *l) {
+    if (lua_type(l, 1) != LUA_TSTRING) {
+        lua_pushnil(l);
+        return 1;
+    }
     size_t len;
     int n = 0;
-    char const *s = luaL_checklstring(l, 1, &len);
-    if (!lua_isnone(l, 2)) {
-        if (!lua_isnumber(l, 2))
-            return 0;
+    char const *s = lua_tolstring(l, 1, &len);
+    if (!lua_isnoneornil(l, 2)) {
+        if (!lua_isnumber(l, 2)) {
+            lua_pushnil(l);
+            return 1;
+        }
         n = int(lua_tonumber(l, 2)) - 1;
     }
-    if (n < 0 || size_t(n) >= len)
-        return 0;
+    if (n < 0 || size_t(n) >= len) {
+        lua_pushnil(l);
+        return 1;
+    }
     lua_pushnumber(l, uint8_t(s[n]));
     return 1;
 }

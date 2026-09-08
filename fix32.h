@@ -12,6 +12,12 @@
 
 #pragma once
 
+#if defined(__has_include)
+#if __has_include("board_config.h")
+#include "board_config.h"
+#endif
+#endif
+
 #include <stdint.h>    // int32_t, int64_t, …
 #include <cmath>       // std::abs
 #include <algorithm>   // std::min

@@ -252,6 +252,16 @@ static int ipairsaux (lua_State *L) {
 }
 
 
+static int luaB_inext (lua_State *L) {
+  int i = luaL_optint(L, 2, 0);
+  luaL_checktype(L, 1, LUA_TTABLE);
+  i++;
+  lua_pushinteger(L, i);
+  lua_rawgeti(L, 1, i);
+  return (lua_isnil(L, -1)) ? 1 : 2;
+}
+
+
 static int luaB_ipairs (lua_State *L) {
   return pairsmeta(L, "__ipairs", 1, ipairsaux);
 }
@@ -435,6 +445,7 @@ static const luaL_Reg base_funcs[] = {
   {"dofile", luaB_dofile},
   {"error", luaB_error},
   {"getmetatable", luaB_getmetatable},
+  {"inext", luaB_inext},
   {"ipairs", luaB_ipairs},
   {"loadfile", luaB_loadfile},
   {"load", luaB_load},

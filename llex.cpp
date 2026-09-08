@@ -25,7 +25,7 @@
 
 
 
-#define next(ls) (ls->current = zgetc(ls->z))
+#define next(ls) (ls->column++, ls->current = zgetc(ls->z))
 
 
 
@@ -112,9 +112,11 @@ static const char *txtToken (LexState *ls, int token) {
 static l_noret lexerror (LexState *ls, const char *msg, int token) {
   char buff[LUA_IDSIZE];
   luaO_chunkid(buff, getstr(ls->source), LUA_IDSIZE);
-  msg = luaO_pushfstring(ls->L, "%s:%d: %s", buff, ls->linenumber, msg);
+  msg = luaO_pushfstring(ls->L, "%s:%d:%d: %s", buff, ls->linenumber,
+                         ls->column, msg);
   if (token)
-    luaO_pushfstring(ls->L, "%s near %s", msg, txtToken(ls, token));
+    luaO_pushfstring(ls->L, "%s near %s (token=%d)", msg,
+                     txtToken(ls, token), token);
   luaD_throw(ls->L, LUA_ERRSYNTAX);
 }
 
@@ -161,6 +163,7 @@ static void inclinenumber (LexState *ls) {
     next(ls);  /* skip `\n\r' or `\r\n' */
   if (++ls->linenumber >= MAX_INT)
     lexerror(ls, "chunk has too many lines", 0);
+  ls->column = 1;
   ls->atsol = 1;
 }
 
@@ -174,6 +177,7 @@ void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
   ls->z = z;
   ls->fs = NULL;
   ls->linenumber = 1;
+  ls->column = 1;
   ls->atsol = 1;
   ls->emiteol = 0;
   ls->lastline = 1;
@@ -254,8 +258,17 @@ static void read_numeral (LexState *ls, SemInfo *seminfo) {
     } else check_next(ls, "Bb");  /* binary? */
   }
   for (;;) {
-    const bool valid_exponent = strchr(expo, ls->current) != NULL &&
-      ls->z->n > 0 &&
+    bool exponent_is_pico8_identifier = false;
+    if (!hexa && strchr(expo, ls->current) != NULL && ls->z->n > 0) {
+      size_t offset = 0;
+      if (ls->z->p[offset] == '+' || ls->z->p[offset] == '-') ++offset;
+      while (offset < ls->z->n &&
+             lisdigit((unsigned char)ls->z->p[offset])) ++offset;
+      exponent_is_pico8_identifier =
+        offset > 0 && offset < ls->z->n && ls->z->p[offset] == '(';
+    }
+    const bool valid_exponent = !exponent_is_pico8_identifier &&
+      strchr(expo, ls->current) != NULL && ls->z->n > 0 &&
       (lisdigit((unsigned char)ls->z->p[0]) ||
        ((ls->z->p[0] == '+' || ls->z->p[0] == '-') &&
         ls->z->n > 1 && lisdigit((unsigned char)ls->z->p[1])));
@@ -442,10 +455,10 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         ls->atsol = atsol;  /* still at sol if we already were. */
         break;
       }
-      case '?': {  /* '?' at start of line */
+      case '?': {  /* PICO-8 print shorthand at a statement boundary */
         next(ls);
-        if (atsol == 1) { ls->emiteol = 1; return TK_PRINT; }
-        return '?';
+        if (atsol == 1) ls->emiteol = 1;
+        return TK_PRINT;
       }
       case '-': {  /* '-' or '-=' or '--' (comment) */
         next(ls);

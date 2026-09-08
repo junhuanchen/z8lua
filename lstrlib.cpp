@@ -996,14 +996,35 @@ static const luaL_Reg strlib[] = {
 };
 
 
+static int str_index (lua_State *L) {
+  if (lua_type(L, 2) == LUA_TNUMBER) {
+    size_t len;
+    const char *s = luaL_checklstring(L, 1, &len);
+    int32_t index = (int32_t)lua_Number::floor(luaL_checknumber(L, 2));
+    if (index < 0)
+      index += (int32_t)len + 1;
+    if (index < 1 || (size_t)index > len) {
+      lua_pushnil(L);
+      return 1;
+    }
+    lua_pushlstring(L, s + index - 1, 1);
+    return 1;
+  }
+  lua_pushvalue(L, 2);
+  lua_gettable(L, lua_upvalueindex(1));
+  return 1;
+}
+
+
 static void createmetatable (lua_State *L) {
   lua_createtable(L, 0, 1);  /* table to be metatable for strings */
   lua_pushliteral(L, "");  /* dummy string */
   lua_pushvalue(L, -2);  /* copy table */
   lua_setmetatable(L, -2);  /* set table as metatable for strings */
   lua_pop(L, 1);  /* pop dummy string */
-  lua_pushvalue(L, -2);  /* get string library */
-  lua_setfield(L, -2, "__index");  /* metatable.__index = string */
+  lua_pushvalue(L, -2);  /* string library upvalue */
+  lua_pushcclosure(L, str_index, 1);
+  lua_setfield(L, -2, "__index");  /* methods and numeric indexing */
   lua_pop(L, 1);  /* pop metatable */
 }
 
