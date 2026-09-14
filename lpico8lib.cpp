@@ -157,7 +157,8 @@ static int pico8_tostr(lua_State *l) {
             lua_Number x = lua_tonumber(l, 1);
             if (hex) {
                 uint32_t b = (uint32_t)x.bits();
-                sprintf(buffer, "0x%04x.%04x", (b >> 16) & 0xffff, b & 0xffff);
+                sprintf(buffer, "0x%04x.%04x", (unsigned int)((b >> 16) & 0xffff),
+                        (unsigned int)(b & 0xffff));
             } else {
                 lua_number2str(buffer, x);
             }

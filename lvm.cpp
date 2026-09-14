@@ -245,8 +245,10 @@ static z8::fix32 lua_peek(struct lua_State *L, z8::fix32 a, int count)
       ret |= PEEK(p, address + 1) << 8;
       ret |= PEEK(p, address);
       address += 2;
+      [[fallthrough]];
     case 2:
       ret |= PEEK(p, address + 1) << 24;
+      [[fallthrough]];
     case 1:
       ret |= PEEK(p, address) << 16;
       break;
